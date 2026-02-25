@@ -1,0 +1,9 @@
+[project]
+name = "voicelatex"
+version = "0.1.0"
+description = "A project for translating voice to LaTeX."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "faster-whisper>=1.2.1",
+]
