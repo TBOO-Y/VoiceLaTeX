@@ -2,3 +2,6 @@ faster-whisper
 librosa
 soundfile
 openai # Only useful if you want to use the OpenAI ASR Base
+torch
+mosestokenizer
+wtpsplit

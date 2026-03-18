@@ -6,4 +6,10 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "faster-whisper>=1.2.1",
+    "librosa>=0.11.0",
+    "mosestokenizer>=1.2.1",
+    "openai>=2.29.0",
+    "soundfile>=0.13.1",
+    "torch>=2.10.0",
+    "wtpsplit>=2.2.0",
 ]

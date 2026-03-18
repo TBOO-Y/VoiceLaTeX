@@ -10,28 +10,32 @@ import io
 import soundfile as sf
 import math
 
+from abc import ABC, abstractmethod
+
+DEFAULT_SAMPLING_RATE = 16000
+
 logger = logging.getLogger(__name__)
 
 
 @lru_cache(10 ** 6)
-def load_audio(fname):
-    a, _ = librosa.load(fname, sr=16000, dtype=np.float32)
-    return a
+def load_audio(filename, sampling_rate=DEFAULT_SAMPLING_RATE):
+    audio, sampling_rate = librosa.load(filename, sr=sampling_rate, dtype=np.float32)
+    return audio
 
 
-def load_audio_chunk(fname, beg, end):
-    audio = load_audio(fname)
-    beg_s = int(beg * 16000)
-    end_s = int(end * 16000)
+def load_audio_chunk(filename, begin, end, sampling_rate=DEFAULT_SAMPLING_RATE):
+    audio = load_audio(filename)
+    beg_s = int(begin * sampling_rate)
+    end_s = int(end * sampling_rate)
     return audio[beg_s:end_s]
 
 
 # Whisper backend
 
-class ASRBase:
+class ASRBase(ABC):
     sep = " "  # join transcribe words with this character (" " for whisper_timestamped,
 
-    # "" for faster-whisper because it emits the spaces when neeeded)
+    # "" for faster-whisper because it emits the spaces when needed)
 
     def __init__(self, lan, modelsize=None, cache_dir=None, model_dir=None, logfile=sys.stderr):
         self.logfile = logfile
@@ -44,12 +48,15 @@ class ASRBase:
 
         self.model = self.load_model(modelsize, cache_dir, model_dir)
 
-    def load_model(self, modelsize, cache_dir):
+    @abstractmethod
+    def load_model(self, modelsize, cache_dir, model_dir):
         raise NotImplemented("must be implemented in the child class")
 
+    @abstractmethod
     def transcribe(self, audio, init_prompt=""):
         raise NotImplemented("must be implemented in the child class")
 
+    @abstractmethod
     def use_vad(self):
         raise NotImplemented("must be implemented in the child class")
 
@@ -202,6 +209,7 @@ class OpenaiApiASR(ASRBase):
 
 
 class HypothesisBuffer:
+    __NGRAM_DROP_THRESHOLD = 5
 
     def __init__(self, logfile=sys.stderr):
         self.commited_in_buffer = []
@@ -224,10 +232,10 @@ class HypothesisBuffer:
             a, b, t = self.new[0]
             if abs(a - self.last_commited_time) < 1:
                 if self.commited_in_buffer:
-                    # it's going to search for 1, 2, ..., 5 consecutive words (n-grams) that are identical in commited and new. If they are, they're dropped.
+                    # it's going to search for 1, 2, ..., self.__NGRAM_DROP_THRESHOLD consecutive words (n-grams) that are identical in commited and new. If they are, they're dropped.
                     cn = len(self.commited_in_buffer)
                     nn = len(self.new)
-                    for i in range(1, min(min(cn, nn), 5) + 1):  # 5 is the maximum
+                    for i in range(1, min(min(cn, nn), self.__NGRAM_DROP_THRESHOLD) + 1):  # __NGRAM_DROP_THRESHOLD is the maximum
                         c = " ".join([self.commited_in_buffer[-j][2] for j in range(1, i + 1)][::-1])
                         tail = " ".join(self.new[j - 1][2] for j in range(1, i + 1))
                         if c == tail:
@@ -283,6 +291,11 @@ class OnlineASRProcessor:
         self.tokenizer = tokenizer
         self.logfile = logfile
 
+        self.audio_buffer = None
+        self.transcript_buffer = None
+        self.buffer_time_offset = None
+        self.commited = []
+
         self.init()
 
         self.buffer_trimming_way, self.buffer_trimming_sec = buffer_trimming
@@ -314,7 +327,7 @@ class OnlineASRProcessor:
         l = 0
         while p and l < 200:  # 200 characters prompt size
             x = p.pop(-1)
-            l += len(x) + 1
+            l += len(x) + 1 # TODO: Make sure this is independent of sep
             prompt.append(x)
         non_prompt = self.commited[k:]
         return self.asr.sep.join(prompt[::-1]), self.asr.sep.join(t for _, _, t in non_prompt)
@@ -378,8 +391,6 @@ class OnlineASRProcessor:
             logger.debug(f"\t\tSENT: {s}")
         if len(sents) < 2:
             return
-        while len(sents) > 2:
-            sents.pop(0)
         # we will continue with audio processing at this timestamp
         chunk_at = sents[-2][1]
 
@@ -434,7 +445,7 @@ class OnlineASRProcessor:
                 w = w.strip()
                 if beg is None and sent.startswith(w):
                     beg = b
-                elif end is None and sent == w:
+                elif end is None and sent == w: # TODO: This assumes tokenization works perfectly, rigorize later
                     end = e
                     out.append((beg, end, fsent))
                     break
@@ -448,7 +459,7 @@ class OnlineASRProcessor:
         o = self.transcript_buffer.complete()
         f = self.to_flush(o)
         logger.debug(f"last, noncommited: {f}")
-        self.buffer_time_offset += len(self.audio_buffer) / 16000
+        self.buffer_time_offset += len(self.audio_buffer) / self.SAMPLING_RATE
         return f
 
     def to_flush(self, sents, sep=None, offset=0, ):
