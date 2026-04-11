@@ -1,0 +1,12 @@
+---
+Morphemes:
+  - tokens: frac
+    latex: \frac
+    num_params: 2
+  - tokens: sub
+    latex: _
+    num_params: 1
+  - tokens: squared
+    latex: ^2
+    num_params: 0
+...
